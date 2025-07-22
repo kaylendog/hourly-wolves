@@ -1,0 +1,4 @@
+services:
+  hourly-wolves:
+    build: .
+    command: https://canary.discord.com/api/webhooks/not-a-real/webhook --schedule "0 0 * * * * *"

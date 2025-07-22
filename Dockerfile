@@ -13,6 +13,7 @@ RUN cargo build --release
 
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
+RUN apt-get update && apt-get install -y ca-certificates
 COPY --from=builder /app/target/release/hourly-wolves /usr/local/bin
 ENTRYPOINT ["/usr/local/bin/hourly-wolves"]
 

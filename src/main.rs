@@ -145,9 +145,7 @@ async fn main() -> eyre::Result<()> {
     // loop over upcoming events and dispatch
     let schedule = Schedule::from_str(&schedule).unwrap();
     for ev_time in schedule.upcoming(Utc) {
-        if let Err(e) = dispatch_message(&client, &host, ev_time).await {
-            error!("Error encountered during dispatch: {}", e);
-        }
+        dispatch_message(&client, &host, ev_time).await?;
     }
 
     Ok(())
