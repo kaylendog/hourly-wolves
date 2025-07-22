@@ -46,6 +46,7 @@ fn get_asset_url(host: &Url, date: DateTime<Utc>) -> eyre::Result<Url> {
 #[tracing::instrument]
 async fn get_asset(host: &Url, date: DateTime<Utc>) -> eyre::Result<Asset> {
     let url = get_asset_url(host, date)?;
+    info!("Fetching asset from {}", url);
     reqwest::get(url)
         .await
         .context("request failed")?
