@@ -122,7 +122,12 @@ async fn dispatch_message(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> eyre::Result<()> {
-    let Args { url, host, now, .. } = Args::parse();
+    let Args {
+        url,
+        host,
+        now,
+        schedule,
+    } = Args::parse();
 
     // setup logging
     tracing_subscriber::fmt().init();
@@ -137,7 +142,7 @@ async fn main() -> eyre::Result<()> {
     }
 
     // loop over upcoming events and dispatch
-    let schedule = Schedule::from_str("0 30 * * * * *").unwrap();
+    let schedule = Schedule::from_str(&schedule).unwrap();
     for ev_time in schedule.upcoming(Utc) {
         if let Err(e) = dispatch_message(&client, &host, ev_time).await {
             error!("Error encountered during dispatch: {}", e);
