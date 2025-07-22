@@ -38,13 +38,13 @@ fn get_asset_url(host: &Url, date: DateTime<Utc>) -> anyhow::Result<Url> {
 
 async fn get_asset(host: &Url, date: DateTime<Utc>) -> anyhow::Result<Asset> {
     let url = get_asset_url(host, date)?;
-    Ok(reqwest::get(url)
+    reqwest::get(url)
         .await
         .context("request failed")?
         .error_for_status()?
         .json::<Asset>()
         .await
-        .context("parsing failed")?)
+        .context("parsing failed")
 }
 
 async fn get_first_attachment(host: &Url, date: DateTime<Utc>) -> anyhow::Result<Attachment> {
@@ -62,7 +62,7 @@ fn build_message(
     ev_time: DateTime<Utc>,
     attachment: Attachment,
 ) -> anyhow::Result<Message> {
-    let url = get_asset_url(&host, ev_time)?;
+    let url = get_asset_url(host, ev_time)?;
     let mut msg = Message::new();
     msg.embed(|embed| {
         embed
@@ -99,11 +99,11 @@ async fn dispatch_message(
         tokio::time::sleep(delta.to_std().context("negative time duration")?).await;
     }
     // fetch attachment
-    let attachment = get_first_attachment(&host, ev_time).await?;
+    let attachment = get_first_attachment(host, ev_time).await?;
 
     // construct client and send
     info!("Dispatching event to Discord");
-    let msg = build_message(&host, ev_time, attachment)?;
+    let msg = build_message(host, ev_time, attachment)?;
     client
         .send_message(&msg)
         .await
