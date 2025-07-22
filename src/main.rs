@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use anyhow::{Context, anyhow};
-use chrono::{DateTime, Datelike, Timelike, Utc};
+use chrono::{DateTime, Datelike, TimeDelta, Timelike, Utc};
 use clap::Parser;
+use color_eyre::eyre::{self, Context, eyre};
 use cron::Schedule;
 use tracing::{error, info};
 use url::Url;
@@ -20,6 +20,12 @@ struct Args {
     /// The host URL.
     #[clap(default_value = "https://hourly.photo/u/wolves/")]
     host: Url,
+    /// Run the hook immediately and exit.
+    #[clap(long)]
+    now: bool,
+    /// The schedule to run against.
+    #[clap(short, long, default_value = "0 30 * * * * *")]
+    schedule: String,
 }
 
 fn format_path(date: DateTime<Utc>) -> String {
@@ -32,11 +38,13 @@ fn format_path(date: DateTime<Utc>) -> String {
     )
 }
 
-fn get_asset_url(host: &Url, date: DateTime<Utc>) -> anyhow::Result<Url> {
+#[tracing::instrument]
+fn get_asset_url(host: &Url, date: DateTime<Utc>) -> eyre::Result<Url> {
     Ok(host.join(&format_path(date))?)
 }
 
-async fn get_asset(host: &Url, date: DateTime<Utc>) -> anyhow::Result<Asset> {
+#[tracing::instrument]
+async fn get_asset(host: &Url, date: DateTime<Utc>) -> eyre::Result<Asset> {
     let url = get_asset_url(host, date)?;
     reqwest::get(url)
         .await
@@ -47,21 +55,23 @@ async fn get_asset(host: &Url, date: DateTime<Utc>) -> anyhow::Result<Asset> {
         .context("parsing failed")
 }
 
-async fn get_first_attachment(host: &Url, date: DateTime<Utc>) -> anyhow::Result<Attachment> {
+#[tracing::instrument]
+async fn get_first_attachment(host: &Url, date: DateTime<Utc>) -> eyre::Result<Attachment> {
     get_asset(host, date)
         .await
         .context("fetching asset failed")?
         .attachment
         .into_iter()
         .next()
-        .ok_or(anyhow!("missing attachment"))
+        .ok_or(eyre!("missing attachment"))
 }
 
+#[tracing::instrument]
 fn build_message(
     host: &Url,
     ev_time: DateTime<Utc>,
     attachment: Attachment,
-) -> anyhow::Result<Message> {
+) -> eyre::Result<Message> {
     let url = get_asset_url(host, ev_time)?;
     let mut msg = Message::new();
     msg.embed(|embed| {
@@ -81,15 +91,16 @@ fn build_message(
     Ok(msg)
 }
 
+#[tracing::instrument(skip(client))]
 async fn dispatch_message(
     client: &WebhookClient,
     host: &Url,
     ev_time: DateTime<Utc>,
-) -> anyhow::Result<()> {
+) -> eyre::Result<()> {
     // delay to a second after the time to ensure clock looks nice
     loop {
         let delta = ev_time - Utc::now();
-        if delta.num_milliseconds() < 0 {
+        if delta < TimeDelta::zero() {
             break;
         }
         info!(
@@ -104,27 +115,34 @@ async fn dispatch_message(
     // construct client and send
     info!("Dispatching event to Discord");
     let msg = build_message(host, ev_time, attachment)?;
-    client
-        .send_message(&msg)
-        .await
-        .map_err(|err| anyhow!(err))?;
+    client.send_message(&msg).await.map_err(|err| eyre!(err))?;
 
     Ok(())
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let Args { url, host, .. } = Args::parse();
-    tracing_subscriber::fmt().init();
+async fn main() -> eyre::Result<()> {
+    let Args { url, host, now, .. } = Args::parse();
 
-    // setup client and schedule
+    // setup logging
+    tracing_subscriber::fmt().init();
+    color_eyre::install()?;
+
     let client = WebhookClient::new(url.as_str());
-    let schedule = Schedule::from_str("0 30 * * * * *").unwrap();
+
+    // dispatch immediately if --now specified
+    if now {
+        dispatch_message(&client, &host, Utc::now()).await?;
+        return Ok(());
+    }
 
     // loop over upcoming events and dispatch
+    let schedule = Schedule::from_str("0 30 * * * * *").unwrap();
     for ev_time in schedule.upcoming(Utc) {
         if let Err(e) = dispatch_message(&client, &host, ev_time).await {
             error!("Error encountered during dispatch: {}", e);
         }
     }
+
+    Ok(())
 }
