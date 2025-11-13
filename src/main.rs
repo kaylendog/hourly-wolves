@@ -4,7 +4,6 @@ use chrono::{DateTime, Datelike, TimeDelta, Timelike, Utc};
 use clap::Parser;
 use color_eyre::eyre::{self, Context, eyre};
 use cron::Schedule;
-use tracing::{error, info};
 use url::Url;
 use webhook::{client::WebhookClient, models::Message};
 
@@ -46,7 +45,7 @@ fn get_asset_url(host: &Url, date: DateTime<Utc>) -> eyre::Result<Url> {
 #[tracing::instrument]
 async fn get_asset(host: &Url, date: DateTime<Utc>) -> eyre::Result<Asset> {
     let url = get_asset_url(host, date)?;
-    info!("Fetching asset from {}", url);
+    tracing::info!("Fetching asset from {}", url);
     reqwest::get(url)
         .await
         .context("request failed")?
@@ -104,9 +103,10 @@ async fn dispatch_message(
         if delta < TimeDelta::zero() {
             break;
         }
-        info!(
+        tracing::info!(
             "Next event scheduled for {} - sleeping for {}",
-            ev_time, delta
+            ev_time,
+            delta
         );
         tokio::time::sleep(delta.to_std().context("negative time duration")?).await;
     }
@@ -114,7 +114,7 @@ async fn dispatch_message(
     let attachment = get_first_attachment(host, ev_time).await?;
 
     // construct client and send
-    info!("Dispatching event to Discord");
+    tracing::info!("Dispatching event to Discord");
     let msg = build_message(host, ev_time, attachment)?;
     client.send_message(&msg).await.map_err(|err| eyre!(err))?;
 
@@ -138,14 +138,18 @@ async fn main() -> eyre::Result<()> {
 
     // dispatch immediately if --now specified
     if now {
-        dispatch_message(&client, &host, Utc::now()).await?;
+        if let Err(err) = dispatch_message(&client, &host, Utc::now()).await {
+            tracing::error!("Error dispatching message: {:?}", err);
+        }
         return Ok(());
     }
 
     // loop over upcoming events and dispatch
     let schedule = Schedule::from_str(&schedule).unwrap();
     for ev_time in schedule.upcoming(Utc) {
-        dispatch_message(&client, &host, ev_time).await?;
+        if let Err(err) = dispatch_message(&client, &host, ev_time).await {
+            tracing::error!("Error dispatching message: {:?}", err);
+        }
     }
 
     Ok(())
